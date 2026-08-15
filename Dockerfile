@@ -4,7 +4,7 @@ WORKDIR /tmp
 
 COPY index.js index.html package.json ./
 
-EXPOSE 3000/tcp
+EXPOSE 7860/tcp
 
 RUN apk update && apk upgrade &&\
     apk add --no-cache openssl curl gcompat iproute2 coreutils &&\
