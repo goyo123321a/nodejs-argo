@@ -1,7 +1,7 @@
 name: Build Node.js Bundle (esbuild)
 
 on:
-  workflow_dispatch:                          # 手动触发
+  workflow_dispatch:
     inputs:
       version_tag:
         description: '版本标签（用于 Release，可选）'
@@ -29,26 +29,25 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          # 使用 Node.js 22 LTS（最新稳定版），避免弃用警告
+          node-version: '22'
+          cache: 'npm'          # 会尝试缓存 node_modules
 
       - name: Install dependencies
-        run: npm ci
+        # 使用 npm install 代替 npm ci（因为没有 package-lock.json）
+        run: npm install
 
       - name: Install esbuild
         run: npm install -g esbuild
 
       - name: Build bundle with esbuild
         run: |
-          # 打包所有 JS 代码，合并依赖，压缩，指定平台为 node
           esbuild index.js --bundle --platform=node --minify --outfile=bundle.js
 
       - name: Prepare artifacts
         run: |
-          # 将 bundle.js 和 index.html 放入 dist 目录（方便上传）
           mkdir -p dist
           cp bundle.js dist/
-          # 如果 index.html 存在则复制
           if [ -f index.html ]; then cp index.html dist/; fi
 
       - name: Upload artifact (bundle + index.html)
