@@ -1,0 +1,93 @@
+name: Build Node.js Bundle (esbuild)
+
+on:
+  workflow_dispatch:                          # 手动触发
+    inputs:
+      version_tag:
+        description: '版本标签（用于 Release，可选）'
+        required: false
+        type: string
+        default: ''
+      create_release:
+        description: '是否创建 Release'
+        required: false
+        type: boolean
+        default: false
+      prerelease:
+        description: '是否为预发布版本'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build-bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install esbuild
+        run: npm install -g esbuild
+
+      - name: Build bundle with esbuild
+        run: |
+          # 打包所有 JS 代码，合并依赖，压缩，指定平台为 node
+          esbuild index.js --bundle --platform=node --minify --outfile=bundle.js
+
+      - name: Prepare artifacts
+        run: |
+          # 将 bundle.js 和 index.html 放入 dist 目录（方便上传）
+          mkdir -p dist
+          cp bundle.js dist/
+          # 如果 index.html 存在则复制
+          if [ -f index.html ]; then cp index.html dist/; fi
+
+      - name: Upload artifact (bundle + index.html)
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-bundle
+          path: dist/
+          retention-days: 30
+
+  release:
+    needs: build-bundle
+    runs-on: ubuntu-latest
+    if: github.event.inputs.create_release == 'true'
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: node-bundle
+          path: dist
+
+      - name: Set tag and release name
+        id: set_tag
+        run: |
+          if [ -z "${{ github.event.inputs.version_tag }}" ]; then
+            echo "tag_name=manual-bundle-${{ github.run_number }}" >> $GITHUB_OUTPUT
+            echo "release_name=Manual Bundle #${{ github.run_number }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag_name=${{ github.event.inputs.version_tag }}" >> $GITHUB_OUTPUT
+            echo "release_name=${{ github.event.inputs.version_tag }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.set_tag.outputs.tag_name }}
+          name: ${{ steps.set_tag.outputs.release_name }}
+          files: dist/**/*
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
