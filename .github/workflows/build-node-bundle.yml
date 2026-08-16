@@ -1,5 +1,10 @@
+# ============================================================
+# 工作流名称：构建 Node.js 单文件 bundle (使用 esbuild)
+# 说明：将 index.js 及其依赖打包成单个 bundle.js，并附带 index.html
+# ============================================================
 name: Build Node.js Bundle (esbuild)
 
+# 触发方式：手动触发，允许用户选择是否发布 Release
 on:
   workflow_dispatch:
     inputs:
@@ -9,7 +14,7 @@ on:
         type: string
         default: ''
       create_release:
-        description: '是否创建 Release'
+        description: '是否创建 GitHub Release'
         required: false
         type: boolean
         default: false
@@ -20,36 +25,64 @@ on:
         default: false
 
 jobs:
+  # ============================================================
+  # Job 1：构建 bundle 并上传为 artifact
+  # ============================================================
   build-bundle:
     runs-on: ubuntu-latest
     steps:
+      # 检出代码
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ----------------------------------------------------------
+      # 设置 Node.js 版本（使用 Node.js 22 LTS，避免 20 弃用警告）
+      # 说明：不再使用 node-version: '20'，改用 22
+      # ----------------------------------------------------------
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          # 使用 Node.js 22 LTS（最新稳定版），避免弃用警告
-          node-version: '22'
-          cache: 'npm'          # 会尝试缓存 node_modules
+          node-version: '22'           # 使用 LTS 版本，规避 Node 20 弃用警告
+          cache: 'npm'                 # 自动缓存 node_modules（若没有 lock 文件，会自动降级）
 
+      # ----------------------------------------------------------
+      # 安装依赖
+      # 注意：由于没有 package-lock.json，必须使用 npm install，而非 npm ci
+      # 如果将来提交了 lock 文件，可改回 npm ci 以加快安装速度
+      # ----------------------------------------------------------
       - name: Install dependencies
-        # 使用 npm install 代替 npm ci（因为没有 package-lock.json）
-        run: npm install
+        run: npm install               # 不使用 npm ci，因为缺少 lock 文件
 
+      # ----------------------------------------------------------
+      # 全局安装 esbuild（用于打包）
+      # ----------------------------------------------------------
       - name: Install esbuild
         run: npm install -g esbuild
 
+      # ----------------------------------------------------------
+      # 使用 esbuild 将 index.js 及所有依赖打包成一个文件
+      # --bundle：打包所有 import/require
+      # --platform=node：针对 Node.js 平台
+      # --minify：压缩代码
+      # --outfile：输出文件
+      # ----------------------------------------------------------
       - name: Build bundle with esbuild
         run: |
           esbuild index.js --bundle --platform=node --minify --outfile=bundle.js
 
+      # ----------------------------------------------------------
+      # 准备发布文件：将 bundle.js 和 index.html 放入 dist 目录
+      # 注意：如果项目中没有 index.html，这行会跳过（但不会导致失败）
+      # ----------------------------------------------------------
       - name: Prepare artifacts
         run: |
           mkdir -p dist
           cp bundle.js dist/
           if [ -f index.html ]; then cp index.html dist/; fi
 
+      # ----------------------------------------------------------
+      # 上传 artifact，保留 30 天
+      # ----------------------------------------------------------
       - name: Upload artifact (bundle + index.html)
         uses: actions/upload-artifact@v4
         with:
@@ -57,17 +90,23 @@ jobs:
           path: dist/
           retention-days: 30
 
+  # ============================================================
+  # Job 2：创建 Release（仅当用户勾选 create_release 时运行）
+  # ============================================================
   release:
-    needs: build-bundle
+    needs: build-bundle                 # 依赖于构建 job 完成
     runs-on: ubuntu-latest
-    if: github.event.inputs.create_release == 'true'
+    if: github.event.inputs.create_release == 'true'   # 条件触发
+
     steps:
+      # 下载之前上传的 artifact
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
           name: node-bundle
           path: dist
 
+      # 设置 Release 的 tag 和名称
       - name: Set tag and release name
         id: set_tag
         run: |
@@ -79,6 +118,7 @@ jobs:
             echo "release_name=${{ github.event.inputs.version_tag }}" >> $GITHUB_OUTPUT
           fi
 
+      # 创建 Release 并上传 dist 中的所有文件
       - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v2
         with:
